@@ -12,9 +12,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * A JWT bearer token that exclude requested from Crumb that contains a valid signed JWT token
+ * A JWT bearer token that exclude requested from Crumb that contains a valid signed JWT token.
+ *
+ * <p>Pinned to a higher-than-default ordinal so it runs before other {@link CrumbExclusion}s that may
+ * consume the request themselves (notably the mcp-server {@code Endpoint}). Otherwise a competing
+ * exclusion could handle a request carrying an invalid/expired Bearer token as anonymous, bypassing
+ * the RFC 6750 401 challenge issued by {@link ProtectedResourceChallengeFilter}.
  */
-@Extension
+@Extension(ordinal = 100)
 public class JwtBearerTokenCrumbExclusion extends CrumbExclusion {
 
     /**
@@ -43,7 +48,7 @@ public class JwtBearerTokenCrumbExclusion extends CrumbExclusion {
             return false;
         }
 
-        // Validate a valid JWT token against any matching issuer
+        // A Bearer token is present on a protected path.
         String tokenString = authHeader.substring(JwtBearerTokenFilter.BEARER_PREFIX.length());
         try {
             SignedJWT signedJWT = SignedJWT.parse(tokenString);
@@ -64,6 +69,12 @@ public class JwtBearerTokenCrumbExclusion extends CrumbExclusion {
         } catch (Exception e) {
             LOG.warn("Failed to parse or verify JWT token from Authorization header", e);
         }
-        return false;
+
+        // Bearer token present but invalid/expired: still drive the chain ourselves so the request
+        // reaches the HttpServletFilter phase (and the ProtectedResourceChallengeFilter 401 challenge)
+        // instead of being consumed by a lower-priority CrumbExclusion (e.g. the mcp-server Endpoint)
+        // that would serve it as anonymous and bypass the RFC 6750 challenge.
+        chain.doFilter(httpRequest, httpResponse);
+        return true;
     }
 }

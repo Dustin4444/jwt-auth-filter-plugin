@@ -76,9 +76,6 @@ public class JwtBearerTokenFilter implements HttpServletFilter {
         // If not, just continue the filters
         String authHeader = httpRequest.getHeader("Authorization");
         if (authHeader == null || !authHeader.startsWith(BEARER_PREFIX)) {
-            LOG.debug(
-                    "Request URI '{}' matches a protected path but carries no Bearer token - passing to challenge filter",
-                    requestURI);
             return false;
         }
 
@@ -98,11 +95,8 @@ public class JwtBearerTokenFilter implements HttpServletFilter {
             return false; // Continue filter chain
         }
 
-        // The Bearer token was presented but could not be validated (e.g. expired or invalid
-        // signature). Continue the filter chain without setting an authentication: the
-        // ProtectedResourceChallengeFilter (ordinal 100) runs next and is responsible for
-        // re-challenging the client with a 401 so it can refresh its token.
-        LOG.warn("JWT Bearer token validation failed for path '{}' - deferring to challenge filter", requestURI);
+        // Continue filters
+        LOG.warn("JWT Bearer token validation failed - continuing with normal auth");
         return false;
     }
 
@@ -145,14 +139,7 @@ public class JwtBearerTokenFilter implements HttpServletFilter {
 
             // Verify signature
             JWSVerifier verifier = createVerifier(jwk);
-            boolean signatureValid = signedJWT.verify(verifier);
-            if (!signatureValid) {
-                LOG.warn("JWT signature verification failed for issuer: {} (key ID: {})", issuer.getJwksUrl(), keyId);
-            } else {
-                LOG.debug(
-                        "JWT signature verified successfully for issuer: {} (key ID: {})", issuer.getJwksUrl(), keyId);
-            }
-            return signatureValid;
+            return signedJWT.verify(verifier);
 
         } catch (Exception e) {
             LOG.warn("JWT signature verification error for issuer: " + issuer.getJwksUrl(), e);
@@ -337,10 +324,7 @@ public class JwtBearerTokenFilter implements HttpServletFilter {
                 return new JwtBearerTokenAuthentication(username, authorities);
             }
 
-            LOG.warn(
-                    "JWT Bearer token validation failed for all {} matching issuer(s) for path '{}' - request will proceed unauthenticated",
-                    matchingIssuers.size(),
-                    requestURI);
+            LOG.debug("JWT token validation failed for all matching issuers");
             return null;
 
         } catch (ParseException e) {

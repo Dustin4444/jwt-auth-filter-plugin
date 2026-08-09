@@ -21,14 +21,6 @@ This means "HTTP basic authentication" is still possible (via username/password 
 
 The plugin exposes `/.well-known/oauth-protected-resource/<resource-path>` with OAuth 2.0 Protected Resource Metadata (RFC 9728), resolved from the exact protected resource path.
 
-## Limitations
-
-Right now claims are hardcoded to `preferred_username` for the user principal, `name` for full name, `email` for email and `groups` for the authorities.
-
-Feel free to open a PR to make it configurable.
-
-JWT token always validated against the JWKS endpoint provided on the system configuration. No caching of the keys is done in this first plugin iteration.
-
 ## Getting started
 
 Install the plugin and configure the JWKS and allowed audience in the 'Security' section.

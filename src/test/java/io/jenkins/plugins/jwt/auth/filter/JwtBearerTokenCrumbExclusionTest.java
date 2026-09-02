@@ -11,11 +11,13 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.lang.reflect.Proxy;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.TestExtension;
@@ -54,6 +56,71 @@ class JwtBearerTokenCrumbExclusionTest {
         assertFalse(
                 response.body().contains(ConsumingCrumbExclusion.MARKER),
                 "The competing CrumbExclusion must not have handled the request; body was: " + response.body());
+    }
+
+    /**
+     * Regression test for the double build trigger bug.
+     *
+     * <p>When a UI POST (e.g. a build request) reaches a protected path without a Bearer token,
+     * {@link JwtBearerTokenCrumbExclusion#process} must return {@code false} <em>without</em> driving
+     * the filter chain, so Jenkins core {@code CrumbFilter} performs normal CSRF crumb validation and
+     * processes the request exactly once. The previous code called {@code chain.doFilter()} on this
+     * branch and then returned {@code false}, so the request was processed here and again by
+     * {@code CrumbFilter} after crumb validation — triggering the build twice.
+     */
+    @Test
+    void noBearerTokenMustNotDriveChain(JenkinsRule jenkinsRule) throws Exception {
+        configure(jenkinsRule);
+        String basePath = jenkinsRule.getURL().getPath().replaceAll("/$", "");
+        String protectedUri = basePath + "/mcp-test/mcp";
+
+        AtomicInteger chainCalls = new AtomicInteger(0);
+        HttpServletRequest request = fakeRequest(protectedUri, null);
+        HttpServletResponse response = fakeResponse();
+        FilterChain chain = (req, resp) -> chainCalls.incrementAndGet();
+
+        boolean handled = new JwtBearerTokenCrumbExclusion().process(request, response, chain);
+
+        assertFalse(
+                handled,
+                "A no-Bearer-token request on a protected path must return false so CrumbFilter runs "
+                        + "normal CSRF crumb validation exactly once.");
+        assertEquals(
+                0,
+                chainCalls.get(),
+                "A no-Bearer-token request must NOT drive the filter chain here; doing so double-processes "
+                        + "the UI request and triggers the build twice.");
+    }
+
+    private static HttpServletRequest fakeRequest(String requestURI, String authHeader) {
+        return (HttpServletRequest) Proxy.newProxyInstance(
+                JwtBearerTokenCrumbExclusionTest.class.getClassLoader(),
+                new Class<?>[] {HttpServletRequest.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getRequestURI" -> requestURI;
+                    case "getHeader" -> "Authorization".equalsIgnoreCase((String) args[0]) ? authHeader : null;
+                    default -> defaultValue(method.getReturnType());
+                });
+    }
+
+    private static HttpServletResponse fakeResponse() {
+        return (HttpServletResponse) Proxy.newProxyInstance(
+                JwtBearerTokenCrumbExclusionTest.class.getClassLoader(),
+                new Class<?>[] {HttpServletResponse.class},
+                (proxy, method, args) -> defaultValue(method.getReturnType()));
+    }
+
+    private static Object defaultValue(Class<?> returnType) {
+        if (returnType == boolean.class) {
+            return false;
+        }
+        if (returnType == int.class) {
+            return 0;
+        }
+        if (returnType == long.class) {
+            return 0L;
+        }
+        return null;
     }
 
     private void configure(JenkinsRule jenkinsRule) throws Exception {

@@ -41,10 +41,11 @@ public class JwtBearerTokenCrumbExclusion extends CrumbExclusion {
             return false;
         }
 
-        // Skip if header is missing
+        // No Bearer token: return false so CrumbFilter runs normal CSRF validation exactly once.
+        // Must NOT drive the chain here (double-processes UI requests -> double build) and must NOT
+        // return true (would bypass CSRF on all protected paths).
         String authHeader = httpRequest.getHeader("Authorization");
         if (authHeader == null || !authHeader.startsWith(JwtBearerTokenFilter.BEARER_PREFIX)) {
-            chain.doFilter(httpRequest, httpResponse);
             return false;
         }
 
